@@ -17,6 +17,7 @@
     --ok-bg: #e4f4ea;
     --no: #c0392b;         /* 빨간 펜 */
     --no-bg: #fbe8e5;
+    --warn: #8a5a00;       /* 사전 확인 "보충" 표시 */
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -30,6 +31,7 @@
       --ok-bg: #173326;
       --no: #f08a7e;
       --no-bg: #3a1f1c;
+      --warn: #e3b341;
     }
   }
 
@@ -50,6 +52,8 @@
   .count { font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .rule { height: 5px; margin: 10px 0 14px; border-top: 2px solid var(--rule); border-bottom: 1px solid var(--rule); }
 
+  .sets { margin-bottom: 10px; }
+  .seg .n { opacity: 0.7; font-weight: 400; margin-left: 4px; font-variant-numeric: tabular-nums; }
   .controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
   .seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; }
   .seg button {
@@ -113,6 +117,16 @@
   .fb-answer .hz { font-family: "Songti SC", "Noto Serif CJK SC", "Noto Serif SC", "SimSun", serif; font-size: 22px; margin-right: 8px; }
   .fb-answer .py { color: var(--rule); margin-right: 8px; }
   .fb-note { margin-top: 6px; font-size: 14px; color: var(--muted); }
+  .fb-dict { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--muted); font-size: 14px; }
+  .fb-dict .badge {
+    display: inline-block; margin-right: 6px; padding: 0 8px; border: 1px solid currentColor;
+    border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap;
+  }
+  .fb-dict .badge.ok { color: var(--ok); }
+  .fb-dict .badge.add { color: var(--warn); }
+  .fb-dict .badge.na { color: var(--muted); }
+  .fb-dict .src { margin-right: 6px; color: var(--muted); }
+  .foot { margin-top: 20px; text-align: center; font-size: 12px; color: var(--muted); }
 
   .btn {
     display: block; width: 100%; min-height: 50px; margin-top: 14px;
@@ -144,8 +158,11 @@
       <span class="count" id="count"></span>
     </div>
     <div class="rule"></div>
+    <div class="sets">
+      <div class="seg" id="setSeg" role="group" aria-label="단어장"></div>
+    </div>
     <div class="controls">
-      <div class="seg" role="group" aria-label="문제 유형">
+      <div class="seg" id="modeSeg" role="group" aria-label="문제 유형">
         <button type="button" data-mode="toMeaning" class="on">한자 → 뜻</button>
         <button type="button" data-mode="toHanzi">뜻 → 한자</button>
       </div>
@@ -155,11 +172,18 @@
   </header>
 
   <section id="stage" aria-live="polite"></section>
+  <footer class="foot">사전 확인 출처: 汉典(zdic.net) · CC-CEDICT(mdbg.net)</footer>
 </main>
 
 <script>
 /* =====================================================================
    1. 단어 목록  ← 단어를 추가/수정하려면 여기만 고치면 됩니다.
+
+   단어장이 두 개 있습니다.
+     NOTE_WORDS : 수업 노트 단어
+     LIT_WORDS  : 중국문학 어휘
+   새 단어장을 만들려면 같은 모양으로 목록을 하나 더 만들고,
+   아래쪽 SETS 에 한 줄 추가하면 됩니다.
 
    한 줄이 단어 하나입니다.
      hanzi   : 한자
@@ -169,7 +193,8 @@
      group   : (선택) 뜻이 비슷한 단어끼리 같은 이름을 붙여 두면,
                서로의 보기(오답)로 나오지 않습니다.
    ===================================================================== */
-const WORDS = [
+// ----- 단어장 1: 수업 노트 -----
+const NOTE_WORDS = [
   { hanzi: "碰撞",       pinyin: "pèngzhuàng",        meaning: "충돌하다" },
   { hanzi: "手势",       pinyin: "shǒushì",           meaning: "손동작" },
   { hanzi: "操练",       pinyin: "cāoliàn",           meaning: "훈련하다, 연습하다" },
@@ -209,11 +234,158 @@ const WORDS = [
   { hanzi: "漫山遍野",   pinyin: "mànshānbiànyě",     meaning: "온 산천에 가득하다" },
 ];
 
+// ----- 단어장 2: 중국문학 어휘 -----
+const LIT_WORDS = [
+  // 동작·행동 표현
+  { hanzi: "派上用场",   pinyin: "pài shàng yòngchǎng", meaning: "실제로 쓰이다, 쓸모가 있다", note: "예) 这东西终于派上用场了。 이 물건이 드디어 요긴하게 쓰였다. (上: 결과·도달)" },
+  { hanzi: "缩成一团",   pinyin: "suō chéng yì tuán",   meaning: "몸을 잔뜩 웅크리다", note: "예) 他缩成一团。 그는 몸을 잔뜩 웅크렸다. (成: 결과보어)" },
+  { hanzi: "迈出脚步",   pinyin: "mài chū jiǎobù",      meaning: "발걸음을 내딛다", note: "예) 他终于迈出了脚步。 그는 마침내 발걸음을 내디뎠다. (出: 방향·결과)", group: "迈" },
+  { hanzi: "迈",         pinyin: "mài",                 meaning: "발을 내딛다, 걸음을 옮기다", group: "迈" },
+  { hanzi: "抱起胳膊",   pinyin: "bào qǐ gēbo",         meaning: "팔을 들어 모으다, 팔짱을 끼듯 하다" },
+  { hanzi: "乱摸",       pinyin: "luàn mō",             meaning: "함부로 만지다, 마구 만지다" },
+  { hanzi: "追查",       pinyin: "zhuīchá",             meaning: "추적하여 조사하다, 끝까지 캐다", group: "살피다" },
+  { hanzi: "打量",       pinyin: "dǎliang",             meaning: "유심히 살펴보다, 훑어보다", note: "예) 他上下打量着我。 그는 나를 위아래로 훑어보았다.", group: "살피다" },
+  { hanzi: "上门",       pinyin: "shàngmén",            meaning: "직접 찾아오다, 방문하다", note: "예) 好久没有客人上门了。 오랫동안 찾아오는 손님이 없었다." },
+  { hanzi: "安了投递口", pinyin: "ān le tóudìkǒu",      meaning: "우편물 투입구를 설치했다", group: "投递口" },
+  { hanzi: "紧闭",       pinyin: "jǐn bì",              meaning: "굳게 닫다, 꽉 닫혀 있다" },
+  { hanzi: "荒废",       pinyin: "huāngfèi",            meaning: "방치하다, 황폐해지다, 소홀히 하다", note: "예) 房子荒废了。 집이 방치되어 황폐해졌다." },
+
+  // 상태·모양·풍경 묘사
+  { hanzi: "身躯",       pinyin: "shēnqū",              meaning: "몸, 육신, 체구" },
+  { hanzi: "恋恋不舍",   pinyin: "liàn liàn bù shě",    meaning: "아쉬워하며 차마 떠나지 못하다" },
+  { hanzi: "一旁",       pinyin: "yī páng",             meaning: "한쪽에, 곁에" },
+  { hanzi: "鳞次栉比",   pinyin: "lín cì zhì bǐ",       meaning: "빽빽하게 줄지어 있다, 즐비하다" },
+  { hanzi: "造型相似",   pinyin: "zàoxíng xiāngsì",     meaning: "외형이나 모양이 비슷하다" },
+  { hanzi: "矗立",       pinyin: "chùlì",               meaning: "우뚝 서 있다, 높이 솟아 있다" },
+  { hanzi: "平缓",       pinyin: "pínghuǎn",            meaning: "완만하다, 차분하다", note: "예) 平缓的坡道愈来愈陡。 완만하던 비탈길이 점점 더 가팔라졌다.", group: "비탈" },
+  { hanzi: "坡道",       pinyin: "pōdào",               meaning: "비탈길, 경사로", note: "예) 平缓的坡道愈来愈陡。 완만하던 비탈길이 점점 더 가팔라졌다.", group: "비탈" },
+  { hanzi: "愈来愈陡",   pinyin: "yù lái yù dǒu",       meaning: "점점 더 가팔라지다", note: "愈来愈 + 형용사: 점점 더 ~하다. 예) 平缓的坡道愈来愈陡。", group: "비탈" },
+  { hanzi: "稀少",       pinyin: "xīshǎo",              meaning: "드물다, 수가 적다" },
+  { hanzi: "商住",       pinyin: "shāngzhù",            meaning: "상업·주거 겸용" },
+  { hanzi: "卷帘",       pinyin: "juǎnlián",            meaning: "말아 올리는 발·가림막 (문맥에 따라 셔터)" },
+  { hanzi: "手电筒",     pinyin: "shǒudiàntǒng",        meaning: "손전등" },
+
+  // 감정·태도·판단 표현
+  { hanzi: "对不住啦",   pinyin: "duì bu zhù la",       meaning: "미안해, 정말 미안해" },
+  { hanzi: "听天由命",   pinyin: "tīng tiān yóu mìng",  meaning: "운명에 맡기다, 하늘의 뜻을 따르다", note: "예) 事情已经这样了，只能听天由命。 일이 이미 이렇게 되어 버렸으니, 이제 운명에 맡길 수밖에 없다." },
+  { hanzi: "掉以轻心",   pinyin: "diào yǐ qīng xīn",    meaning: "방심하다, 경계를 늦추다", note: "예) 千万不能掉以轻心。 절대로 방심해서는 안 된다.", group: "부주의" },
+  { hanzi: "冒冒失失",   pinyin: "mào mào shī shī",     meaning: "덤벙대며, 경솔하게, 무작정", note: "冒冒失失地 + 동사: 경솔하게 ~하다. 예) 冒冒失失地跑出去 = 무작정 뛰쳐나가다", group: "부주의" },
+  { hanzi: "势必",       pinyin: "shìbì",               meaning: "필연적으로 ~하다, 반드시 ~하게 되다", note: "예) 这样下去，势必会失败。 이렇게 계속하다가는 필연적으로 실패하게 될 것이다." },
+  { hanzi: "并不算",     pinyin: "bìng bù suàn",        meaning: "그다지 ~한 편은 아니다, ~라고 할 수는 없다", note: "并不算 + 형용사. 예) 并不算难 = 그다지 어렵지 않다" },
+  { hanzi: "保险吗？",   pinyin: "bǎoxiǎn ma",          meaning: "안전해? 확실해? 괜찮겠어?" },
+
+  // 사물·자동차·기간 관련 표현
+  { hanzi: "皇冠车",     pinyin: "huángguān chē",       meaning: "크라운 자동차, 토요타 크라운" },
+  { hanzi: "年限",       pinyin: "niánxiàn",            meaning: "연한, 정해진 기간, 사용 연수" },
+  { hanzi: "报销",       pinyin: "bàoxiāo",             meaning: "비용을 정산받다 (문맥에 따라 폐기 처분하다)", group: "报销" },
+  { hanzi: "快报销了",   pinyin: "kuài bàoxiāo le",     meaning: "곧 폐기할 지경이다, 거의 수명이 다했다", group: "报销" },
+  { hanzi: "投递口",     pinyin: "tóudìkǒu",            meaning: "우편물 투입구", group: "投递口" },
+];
+
+// ----- 단어장 목록 (화면 맨 위 버튼으로 고릅니다) -----
+const WORDS = [...NOTE_WORDS, ...LIT_WORDS];   // 전체
+const SETS = [
+  { id: "all",  name: "전체",     words: WORDS },
+  { id: "note", name: "수업 노트", words: NOTE_WORDS },
+  { id: "lit",  name: "중국문학", words: LIT_WORDS },
+];
+
+/* =====================================================================
+   1-2. 사전 확인 결과  (정답을 본 뒤에 뜻 아래에 같이 보여 줍니다)
+
+   내가 적은 뜻을 사전과 비교한 결과입니다.
+     "한자": ["판정", "출처", "사전 뜻(한국어로 옮김)"]
+   판정은 세 가지입니다.
+     "일치"        : 사전 뜻과 같음
+     "보충"        : 틀리진 않지만 사전 뜻과 차이가 있어 덧붙임
+     "표제어 없음" : 사전에 따로 실리지 않은 구(句)·신조어. 구성 단어로 확인
+   ===================================================================== */
+const DICT_CHECK = {
+  // ----- 수업 노트 -----
+  "碰撞":       ["일치", "CC-CEDICT", "충돌하다; 충돌"],
+  "手势":       ["일치", "CC-CEDICT", "손짓, 제스처; 신호"],
+  "操练":       ["일치", "CC-CEDICT", "훈련(하다), 연습(하다)"],
+  "选址":       ["일치", "CC-CEDICT", "알맞은 부지를 고르다; 부지, 위치"],
+  "有的是":     ["일치", "CC-CEDICT", "얼마든지 있다, 부족하지 않다"],
+  "威化饼":     ["표제어 없음", "", "威化는 wafer를 소리대로 옮긴 말. 威化饼(干)은 웨하스 과자로, 뜻이 맞음"],
+  "补给":       ["일치", "CC-CEDICT", "보급(하다), 보충하다. 给를 jǐ로 읽음"],
+  "踩雷":       ["일치", "CC-CEDICT", "지뢰를 밟다; (비유) 무심코 한 일로 낭패를 보다, 스포일러를 당하다"],
+  "种草":       ["일치", "CC-CEDICT", "(신조어) 상품이나 아이디어에 관심이 생기게 하다, 특히 SNS에서"],
+  "种草帖":     ["표제어 없음", "", "种草(사고 싶게 만들다) + 帖(게시글) = 추천 글"],
+  "安利":       ["일치", "CC-CEDICT", "(상품 등을) 추천하다, 홍보하다. 원래는 브랜드 이름 '암웨이'"],
+  "红红火火":   ["보충", "汉典", "红火: 번창하고 활기찬 모양. '인기'보다는 장사·살림·분위기가 번창한다는 뜻에 가까움"],
+  "黑料":       ["표제어 없음", "", "신조어라 사전에 없음. 실제로는 '폭로된 부정적인 과거나 자료'라는 뜻으로 쓰여, 뜻이 맞음"],
+  "红得发紫":   ["보충", "汉典", "권세나 명성이 절정에 이르다. 汉典에는 '풍자'라는 표시가 없고, 비꼬는 느낌은 문맥에 따라 생김"],
+  "时代的洪流": ["일치", "汉典", "洪流: 거대하게 흐르는 물살; (비유) 거센 물살 같은 강한 힘"],
+  "不可阻挡":   ["표제어 없음", "", "不可(~할 수 없다) + 阻挡(막다). 뜻이 맞음"],
+  "攻坚战":     ["보충", "汉典", "적의 견고한 방어 진지를 공격하는 전투. '계속 공격'이 아니라 '견고한 것을 공략'하는 것이 핵심. (비유) 가장 어려운 과제를 푸는 싸움"],
+  "含着金汤匙": ["표제어 없음", "", "含着(입에 물고) + 金汤匙(금수저). 보통 含着金汤匙出生으로 씀. 뜻이 맞음"],
+  "铁饭碗":     ["일치", "汉典", "(비유) 매우 안정된 직업이나 직위"],
+  "金饭碗":     ["일치", "汉典", "(비유) 대우가 좋고 수입이 많은 직업"],
+  "捧":         ["일치", "汉典", "두 손으로 받쳐 들다; 치켜세우다, 추어올리다; (양사) 한 움큼"],
+  "山清水秀":   ["일치", "汉典", "풍경이 아름답다. 山明水秀라고도 함"],
+  "绿水青山":   ["일치", "汉典", "수려한 자연 산천의 풍경"],
+  "怀念":       ["일치", "汉典", "마음 깊이 그리워하다; 지난 사람이나 일을 회상하다"],
+  "思念":       ["일치", "汉典", "그리워하다, 생각하다"],
+  "想念":       ["일치", "汉典", "그리워하다"],
+  "内心不安":   ["표제어 없음", "", "内心(마음속) + 不安(불안하다). 뜻이 맞음"],
+  "担忧":       ["일치", "汉典", "마음속으로 근심하고 걱정하다"],
+  "忧虑":       ["일치", "汉典", "근심하고 걱정하다; 걱정에서 오는 불안"],
+  "焦虑":       ["일치", "汉典", "근심하고 걱정하다 (초조·불안)"],
+  "懊悔":       ["일치", "汉典", "잘못을 스스로 원망하다, 뉘우치며 후회하다"],
+  "懊恼":       ["보충", "汉典", "뜻대로 되지 않아 답답하고 괴롭다; 뉘우치고 한스러워하다. '번뇌'(烦恼)보다는 '속상해하다, 괴로워하다'에 가까움"],
+  "子孙后代":   ["일치", "汉典", "같은 조상에게서 대대로 이어지는 후손"],
+  "埋葬":       ["일치", "汉典", "시신을 땅에 묻다"],
+  "扫墓":       ["일치", "汉典", "묘를 찾아 제사 지내고 돌보다"],
+  "上头":       ["보충", "汉典", "汉典에 실린 뜻은 '위쪽, 상급 기관'(shàngtou) 등. '취기가 오르다, 푹 빠지다'는 구어·인터넷 용법이라 汉典에는 없음"],
+  "漫山遍野":   ["일치", "汉典", "산과 들에 가득하다. 수가 많거나 범위가 넓음을 나타냄"],
+
+  // ----- 중국문학 -----
+  "派上用场":   ["표제어 없음", "汉典", "用场: 쓰임새, 용도. 派上用场은 '쓰임새가 생기다'로, 뜻이 맞음"],
+  "缩成一团":   ["표제어 없음", "", "缩(움츠리다) + 成一团(한 덩어리가 되다). 뜻이 맞음"],
+  "迈出脚步":   ["표제어 없음", "", "迈出(내딛다) + 脚步(발걸음). 뜻이 맞음"],
+  "迈":         ["일치", "汉典", "다리를 들어 앞으로 내딛다. '늙다'(老迈)의 뜻도 있음"],
+  "抱起胳膊":   ["보충", "", "사전 표제어는 아님. 抱(끌어안다) + 胳膊(팔)로, 抱着胳膊는 보통 '팔짱을 끼다'로 옮김"],
+  "乱摸":       ["표제어 없음", "", "乱(함부로) + 摸(만지다). 뜻이 맞음"],
+  "追查":       ["일치", "汉典", "추궁하여 조사하다"],
+  "打量":       ["일치", "汉典", "(사람을) 자세히 살펴보다; ~라고 여기다, 짐작하다"],
+  "上门":       ["일치", "汉典", "남의 집에 찾아가다. '문을 닫다', '데릴사위로 들어가다'의 뜻도 있음"],
+  "安了投递口": ["표제어 없음", "", "安(설치하다) + 了 + 投递口(우편물 투입구). 뜻이 맞음"],
+  "紧闭":       ["일치", "汉典", "꼭 닫다"],
+  "荒废":       ["일치", "汉典", "(밭이) 돌보는 사람 없이 황폐해지다; 오래 안 해서 서툴러지다; 시간을 헛되이 보내다"],
+  "身躯":       ["일치", "汉典", "사람이나 동물의 몸"],
+  "恋恋不舍":   ["일치", "汉典", "몹시 아쉬워 차마 헤어지지 못하다"],
+  "一旁":       ["일치", "汉典", "한쪽, 옆"],
+  "鳞次栉比":   ["일치", "汉典", "물고기 비늘과 빗살처럼 빽빽하고 가지런히 늘어서 있다"],
+  "造型相似":   ["표제어 없음", "", "造型(모양, 조형) + 相似(비슷하다). 뜻이 맞음"],
+  "矗立":       ["일치", "汉典", "높이 솟아 우뚝 서 있다"],
+  "平缓":       ["일치", "汉典", "가파르지 않다, 경사가 완만하다; (말·태도가) 부드럽다; 평온하고 느리다"],
+  "坡道":       ["일치", "汉典", "고르게 경사진 보도나 차도"],
+  "愈来愈陡":   ["표제어 없음", "", "愈来愈(점점 더) + 陡(가파르다). 뜻이 맞음"],
+  "稀少":       ["일치", "汉典", "드물다, 수가 적다"],
+  "商住":       ["표제어 없음", "", "商(상업) + 住(주거). 商住楼(주상복합 건물)처럼 씀. 뜻이 맞음"],
+  "卷帘":       ["일치", "汉典", "발을 말아 올리다; 말아 올릴 수 있는 커튼·문발. 셔터는 卷帘门"],
+  "手电筒":     ["일치", "汉典", "건전지로 켜는 작은 원통형 조명 기구"],
+  "对不住啦":   ["일치", "汉典", "对不住: 미안함이나 죄송함을 나타내는 말. 汉典은 병음을 duì bú zhù로 적음"],
+  "听天由命":   ["일치", "汉典", "하늘의 뜻과 운명에 맡기고 스스로 애쓰지 않다"],
+  "掉以轻心":   ["일치", "汉典", "일을 대하는 태도가 경솔하고 신중하지 못하다"],
+  "冒冒失失":   ["일치", "汉典", "지나치게 함부로, 경솔하게 대하다"],
+  "势必":       ["일치", "汉典", "형세로 보아 반드시 그렇게 되다"],
+  "并不算":     ["표제어 없음", "", "并不(결코 ~않다) + 算(~인 셈이다). 뜻이 맞음"],
+  "保险吗？":   ["일치", "汉典", "保险: 믿을 만하고 안전해서 탈이 없다; 틀림없이; (기계의) 안전장치"],
+  "皇冠车":     ["표제어 없음", "", "皇冠(왕관; 토요타 '크라운') + 车(차). 뜻이 맞음"],
+  "年限":       ["일치", "汉典", "정해진 햇수; 물건을 쓸 수 있는 기간"],
+  "报销":       ["일치", "汉典", "쓴 비용을 청구해 정산받다; 못 쓰게 된 물건을 폐기 처리하다; (농담) 사람·물건이 끝장나다"],
+  "快报销了":   ["표제어 없음", "", "快…了(곧 ~하게 되다) + 报销(폐기되다). 뜻이 맞음"],
+  "投递口":     ["표제어 없음", "汉典", "投递: 물품이나 편지를 전달하다. 投递 + 口(구멍) = 우편물 투입구로, 뜻이 맞음"],
+};
+
 const CHOICE_COUNT = 4;   // 보기 개수
 
 /* =====================================================================
    2. 퀴즈 상태 (지금 몇 번째 문제인지, 몇 개 맞혔는지 등)
    ===================================================================== */
+let setId = "all";        // 지금 고른 단어장 (SETS 의 id)
 let mode = "toMeaning";   // "toMeaning": 한자 보고 뜻 고르기 / "toHanzi": 뜻 보고 한자 고르기
 let queue = [];           // 이번에 풀 단어들 (섞인 순서)
 let pos = 0;              // 지금 몇 번째 문제인지 (0부터 시작)
@@ -240,6 +412,11 @@ function shuffle(list) {
   return arr;
 }
 
+// 지금 고른 단어장의 단어들을 돌려줍니다.
+function activeWords() {
+  return SETS.find(s => s.id === setId).words;
+}
+
 // HTML 요소를 간단히 만드는 함수: el("div", "클래스이름", "글자")
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -250,7 +427,7 @@ function el(tag, className, text) {
 
 // 정답 1개 + 오답 3개를 골라 섞습니다. 뜻이 비슷한(group이 같은) 단어는 오답에서 뺍니다.
 function makeChoices(word) {
-  const pool = WORDS.filter(w => w !== word && !(word.group && w.group === word.group));
+  const pool = activeWords().filter(w => w !== word && !(word.group && w.group === word.group));
   const picked = [];
   const usedGroups = new Set();
   for (const w of shuffle(pool)) {
@@ -356,6 +533,18 @@ function answer(chosen, chosenBtn) {
   line.append(el("span", "hz", current.hanzi), el("span", "py", current.pinyin), el("span", "mn", current.meaning));
   fb.append(line);
   if (current.note) fb.append(el("div", "fb-note", current.note));
+
+  // 사전 확인 결과 (있으면 뜻 아래에 보여 줍니다)
+  const check = DICT_CHECK[current.hanzi];
+  if (check) {
+    const [verdict, source, text] = check;
+    const kind = verdict === "일치" ? "ok" : verdict === "보충" ? "add" : "na";
+    const row = el("div", "fb-dict");
+    row.append(el("span", "badge " + kind, "사전 확인 · " + verdict));
+    if (source) row.append(el("span", "src", source));
+    row.append(el("span", "", text));
+    fb.append(row);
+  }
   card.append(fb);
 
   const isLast = pos === queue.length - 1;
@@ -403,7 +592,7 @@ function showResult() {
 
   const again = el("button", wrong.length > 0 ? "btn ghost" : "btn", "전체 다시 풀기");
   again.type = "button";
-  again.addEventListener("click", () => start(WORDS));
+  again.addEventListener("click", () => start(activeWords()));
   card.append(again);
 
   stage.append(card);
@@ -414,13 +603,28 @@ function showResult() {
 /* =====================================================================
    5. 버튼·키보드 연결
    ===================================================================== */
+// 단어장 고르기 버튼 만들기 (바꾸면 처음부터 다시 시작)
+const setSeg = document.getElementById("setSeg");
+SETS.forEach(set => {
+  const btn = el("button", set.id === setId ? "on" : "", set.name);
+  btn.type = "button";
+  btn.append(el("span", "n", String(set.words.length)));
+  btn.addEventListener("click", () => {
+    if (set.id === setId) return;
+    setId = set.id;
+    setSeg.querySelectorAll("button").forEach(b => b.classList.toggle("on", b === btn));
+    start(activeWords());
+  });
+  setSeg.append(btn);
+});
+
 // 문제 유형 바꾸기 (바꾸면 처음부터 다시 시작)
-document.querySelectorAll(".seg button").forEach(btn => {
+document.querySelectorAll("#modeSeg button").forEach(btn => {
   btn.addEventListener("click", () => {
     if (btn.dataset.mode === mode) return;
     mode = btn.dataset.mode;
-    document.querySelectorAll(".seg button").forEach(b => b.classList.toggle("on", b === btn));
-    start(WORDS);
+    document.querySelectorAll("#modeSeg button").forEach(b => b.classList.toggle("on", b === btn));
+    start(activeWords());
   });
 });
 
@@ -441,7 +645,7 @@ document.addEventListener("keydown", e => {
   }
 });
 
-start(WORDS);
+start(activeWords());
 </script>
 </body>
 </html>
